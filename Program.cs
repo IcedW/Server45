@@ -1,71 +1,43 @@
-﻿namespace Server
+﻿using System;
+
+namespace Server
 {
-    using System;
+    using Microsoft.AspNetCore.Builder;
+    using System.IO;
+    using Microsoft.AspNetCore.Http;
     using System.Collections.Generic;
-    using System.Net;
-    using System.Net.Sockets;
     using System.Text;
     using System.Threading.Tasks;
 
     class Program
     {
-        static List<TcpClient> clients = new List<TcpClient>();
-
-        static async Task Main()
+        static async Task Main(string[] args)
         {
-            TcpListener server = new TcpListener(IPAddress.Any, 5000);
-            server.Start();
+            var builder = WebApplication.CreateBuilder(args);
+            var app = builder.Build();
 
-            while (true)
+            List<string> messages = new();
+
+            app.MapGet("/", () => "OK");
+
+            app.MapPost("/send", async (HttpContext context) =>
             {
-                var client = await server.AcceptTcpClientAsync();
-                clients.Add(client);
+                using var reader = new StreamReader(context.Request.Body, Encoding.UTF8);
+                string msg = await reader.ReadToEndAsync();
 
-                Console.WriteLine("+");
+                if (!string.IsNullOrWhiteSpace(msg))
+                    messages.Add(msg);
 
-                _ = HandleClient(client);
-            }
-        }
+                return Results.Ok();
+            });
 
-        static async Task HandleClient(TcpClient client)
-        {
-            var stream = client.GetStream();
-            byte[] buffer = new byte[1024];
-
-            try
+            app.MapGet("/messages", () =>
             {
-                while (true)
-                {
-                    int bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length);
+                return string.Join("\n", messages);
+            });
 
-                    if (bytesRead == 0)
-                        break;
-
-                    string message = Encoding.UTF8.GetString(buffer, 0, bytesRead);
-
-                    Console.WriteLine(message);
-
-                    await Broadcast(message);
-                }
-            }
-            catch { }
-
-            clients.Remove(client);
-            client.Close();
-        }
-
-        static async Task Broadcast(string message)
-        {
-            byte[] data = Encoding.UTF8.GetBytes(message);
-
-            foreach (var client in clients)
-            {
-                try
-                {
-                    await client.GetStream().WriteAsync(data, 0, data.Length);
-                }
-                catch { }
-            }
+            var port = Environment.GetEnvironmentVariable("PORT") ?? "5000";
+            app.Run($"http://0.0.0.0:{port}");
         }
     }
 }
